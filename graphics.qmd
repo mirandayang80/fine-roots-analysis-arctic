@@ -1,0 +1,132 @@
+---
+title: "graphics"
+format: html
+---
+
+```{r}
+```
+
+
+```{r}
+# install.packages(c("igraph", "ggraph", "ggplot2", "tidygraph"))
+library(igraph)
+library(ggraph)
+library(tidygraph)
+library(ggplot2)
+
+# Create the relationships (From -> To)
+edges <- data.frame(
+  from = c("Root", "Root", "Research", "Research", "Research", "Education", "Education", "Education"),
+  to   = c("Research", "Education", "Continental synthesis", "Coordinated Arctic network", "Experimental tests", "Courses", "Collaboration", "Leadership")
+)
+
+# Create node details (to style different groups uniquely)
+nodes <- data.frame(
+  name = unique(c(edges$from, edges$to))
+)
+nodes$group <- ifelse(nodes$name %in% c("Root", "Research", "Education"), "Hub", "Project")
+
+# Convert to a tidy graph object
+graph <- tbl_graph(nodes = nodes, edges = edges, directed = TRUE)
+
+ggraph(graph, layout = 'dendrogram', circular = FALSE) + 
+  # Draw smooth, organic curved branching lines
+  geom_edge_diagonal(aes(alpha = ..index..), color = "#7a9a60", width = 1.2, show.legend = FALSE) +
+  
+  # Draw the nodes as clean, styled circles
+  geom_node_point(aes(color = group, size = group), show.legend = FALSE) +
+  
+  # Add elegant text labels with slight offsets so they don't overlap
+  geom_node_text(aes(label = name), repel = TRUE, 
+                 size = 4.5, fontface = "bold", color = "#333333") +
+  
+  # Custom color palettes for a professional aesthetic
+  scale_color_manual(values = c("Hub" = "#2c3e50", "Project" = "#e74c3c")) +
+  scale_size_manual(values = c("Hub" = 8, "Project" = 4)) +
+  
+  # Clean up the background completely
+  theme_void() +
+  theme(
+    panel.background = element_rect(fill = "#fafafa", color = NA),
+    plot.margin = margin(20, 20, 20, 20)
+  )
+```
+```{r}
+library(tidyverse)
+library(tidygraph)
+library(ggraph)
+
+# 1. Define the nodes (Entities in your story)
+nodes <- tibble(
+  name = c(
+    # Research Progression
+    "Continental\nSynthesis (Obj 1)", "Coordinated\nNetwork (Obj 2)", "Mechanistic\nExperiment (Obj 3)",
+    # Education Progression
+    "Foundational\nCoursework", "Independent\nResearch (SURF)", "Collaborative\nScience (Network)", "Scientific\nLeadership",
+    # Core Skill sets (The glue)
+    "Skill: Scientific Research", "Skill: Collaborative Science", "Skill: Observation & Comm"
+  ),
+  stream = c("Research", "Research", "Research", "Education", "Education", "Education", "Education", "Skill", "Skill", "Skill"),
+  importance = c(3, 4, 5, 3, 4, 5, 6, 4, 4, 4) # Dictates size
+)
+
+# 2. Define the intersecting connections (Edges)
+edges <- tibble(
+  from = c(
+    # Parallel progress rails
+    "Continental\nSynthesis (Obj 1)", "Coordinated\nNetwork (Obj 2)",
+    "Foundational\nCoursework", "Independent\nResearch (SURF)", "Collaborative\nScience (Network)",
+    
+    # Intersecting "Mycorrhizal" connections between Research & Education
+    "Foundational\nCoursework", "Independent\nResearch (SURF)", 
+    "Collaborative\nScience (Network)", "Scientific\nLeadership",
+    
+    # Mapping to Skills
+    "Continental\nSynthesis (Obj 1)", "Coordinated\nNetwork (Obj 2)", "Mechanistic\nExperiment (Obj 3)",
+    "Foundational\nCoursework", "Independent\nResearch (SURF)", "Collaborative\nScience (Network)", "Scientific\nLeadership"
+  ),
+  to = c(
+    # Parallel rails links
+    "Coordinated\nNetwork (Obj 2)", "Mechanistic\nExperiment (Obj 3)",
+    "Independent\nResearch (SURF)", "Collaborative\nScience (Network)", "Scientific\nLeadership",
+    
+    # Intersecting links
+    "Continental\nSynthesis (Obj 1)", "Coordinated\nNetwork (Obj 2)",
+    "Coordinated\nNetwork (Obj 2)", "Mechanistic\nExperiment (Obj 3)",
+    
+    # Skills links
+    "Skill: Scientific Research", "Skill: Collaborative Science", "Skill: Scientific Research",
+    "Skill: Scientific Research", "Skill: Scientific Research", "Skill: Collaborative Science", "Skill: Observation & Comm"
+  ),
+  type = c(rep("Rail", 5), rep("Hyphae (Intersection)", 4), rep("Skill Link", 7))
+)
+
+# 3. Create graph object
+graph <- tbl_graph(nodes = nodes, edges = edges, directed = FALSE)
+
+# 4. Plot the intersecting network
+ggraph(graph, layout = "stress") +
+  # Draw intersecting lines differently than standard process lines
+  geom_edge_diagonal(aes(color = type, alpha = type, width = type), show.legend = TRUE) +
+  scale_edge_color_manual(values = c("Rail" = "#2c3e50", "Hyphae (Intersection)" = "#8dd3c7", "Skill Link" = "#b3de69")) +
+  scale_edge_width_manual(values = c("Rail" = 1.5, "Hyphae (Intersection)" = 1, "Skill Link" = 0.8)) +
+  scale_edge_alpha_manual(values = c("Rail" = 0.8, "Hyphae (Intersection)" = 0.6, "Skill Link" = 0.4)) +
+  
+  # Nodes styled by their stream
+  geom_node_point(aes(color = stream, size = importance), show.legend = TRUE) +
+  scale_color_manual(values = c("Research" = "#225ea8", "Education" = "#41ab5d", "Skill" = "#feb24c")) +
+  scale_size_continuous(range = c(5, 12), guide = "none") +
+  
+  # Clear typography that repels to avoid overlaps
+  geom_node_text(aes(label = name), repel = TRUE, size = 3.5, fontface = "bold", color = "#2d2d2d", box.padding = 0.6) +
+  
+  # Elegant, clean presentation theme
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(size = 10, face = "bold"),
+    panel.background = element_rect(fill = "#faf9f6", color = NA), # Soft warm background
+    plot.margin = margin(20, 20, 20, 20)
+  )
+```
+
