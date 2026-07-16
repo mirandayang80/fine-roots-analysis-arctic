@@ -1,0 +1,742 @@
+---
+title: "Arctic FRED Analysis"
+format: html
+
+---
+
+```{r, include = FALSE}
+library(mosaic)
+library(ggformula)
+library(tidyverse)
+library(stringr)
+library(janitor)
+library(sf)
+library(geosphere)
+library(fuzzyjoin)
+library(dplyr)
+library(rnaturalearth)
+library(ggnewscale)
+library(stringr)
+library(tibble)
+library(dplyr)
+library(kableExtra)
+
+options(digits = 6)
+```
+
+# Importing Data
+
+```{r}
+# Importing data sets
+# FRED3 <- read.csv("FRED3.csv")
+FRED4 <- read.csv("FRED4_Entire_Database_2026.csv")
+FRED_newest <- readr::read_csv("FRED_NEWEST.csv",
+                        locale = readr::locale(encoding = "latin1"))
+# 
+# AU <- read.csv("AUwarming.csv")
+```
+
+# Cleaning Data
+
+## FRED 4.0 Cleaning
+
+
+```{r, warning = FALSE}
+# FRED 4 data cleaning
+
+# making first row replace the header
+FRED4 <- FRED4 |> row_to_names(1)
+
+# remove irrelevant rows
+FRED4 <- FRED4 |>
+  filter(`Version_FRED version number` == "4" | 
+           `Version_FRED version number` == "2" |
+           `Version_FRED version number` == "3" |
+           `Version_FRED version number` == "1" |
+           `Notes_Row ID` == "Meta_Data")
+
+# pulling the first row as a vector 
+var_type <- unlist(FRED4[1,], use.names = FALSE)
+
+# get vector of indices that correspond to root traits
+indices <- rep(0, length(var_type))
+
+# looping through entire row of variable types
+for (i in 1:length(var_type)) {
+  
+  # if entry is empty
+  if(is.na(var_type[i])){
+    # skip that entry
+    i = i + 1
+  } 
+  # if the variable type is root trait
+  else if (var_type[i] == "Root_Traits") {
+   
+    # add the index to our vector
+    indices[i] <- i
+
+  }
+}
+
+# dropping "0" values from indices vector
+indices <- indices[indices != 0]
+
+# dplyr::selecting columns with article, lat, long, and root traits
+FRED4_cleaned <- FRED4 |>
+   # create short variable name for article
+  rename(Article = "Abbreviated article citation",
+         citation = "Data source_Citation",
+         order = "Plant taxonomy_Accepted order_WFO",
+         family = "Plant taxonomy_Accepted family_WFO", 
+         genus = "Plant taxonomy_Accepted genus_WFO", 
+         species = "Plant Taxonomy_Accepted species_WFO",
+         growth = "Plant growth form_TRY") |>
+  # dplyr::select article, coordinates, and root trait columns
+  dplyr::select(Article, citation, Latitude_Main, Longitude_Main,
+                order, family, genus, species, growth,
+                indices)
+
+# removing the row that represented "type"
+FRED4_cleaned <- FRED4_cleaned[3:nrow(FRED4_cleaned),]
+
+# keeping only non-empty columns
+FRED4_cleaned <- FRED4_cleaned |>
+  dplyr::select(where(~ any(!is.na(.) & . != "")))
+
+
+
+
+```
+
+## Arctic FRED Cleaning 4.1
+
+```{r}
+
+# making first row replace the header
+FRED4new <- FRED_newest |> row_to_names(1)
+
+# remove irrelevant rows
+FRED4new <- FRED4new |>
+  filter(`Data_Raw or unpublished` == "main article" |
+           `Data_Raw or unpublished` == "supplement" |
+           `Data source_Citation` == "Meta_Data")
+
+# pulling the first row as a vector
+var_type <- unlist(FRED4new[1,], use.names = FALSE)
+
+# get vector of indices that correspond to root traits
+indices <- rep(0, length(var_type))
+
+# looping through entire row of variable types
+for (i in 1:length(var_type)) {
+
+  # if entry is empty
+  if(is.na(var_type[i])){
+    # skip that entry
+    i = i + 1
+  }
+  # if the variable type is root trait
+  else if (var_type[i] == "Root_Traits") {
+
+    # add the index to our vector
+    indices[i] <- i
+
+  }
+}
+
+# dropping "0" values from indices vector
+indices <- indices[indices != 0]
+
+# selecting columns with article, lat, long, and root traits
+FRED4new_cleaned <- FRED4new |>
+   # create short variable name for article
+  rename(Article = "Abbreviated article citation",
+         citation = "Data source_Citation",
+         order = "Plant taxonomy_Accepted order_WFO",
+         family = "Plant taxonomy_Accepted family_WFO",
+         genus = "Plant taxonomy_Accepted genus_WFO",
+         species = "Plant Taxonomy_Accepted species_WFO",
+         growth = "Plant growth form_TRY") |>
+  # select article, coordinates, and root trait columns
+  dplyr::select(Article, citation, Latitude_Main, Longitude_Main,
+                order, family, genus, species, growth,
+                indices)
+
+# removing the row that represented "type"
+FRED4new_cleaned <- FRED4new_cleaned[3:nrow(FRED4new_cleaned),]
+
+# # keeping only non-empty columns
+FRED4new_cleaned <- FRED4new_cleaned |>
+  dplyr::select(where(~ any(!is.na(.) & . != "")))
+
+```
+
+
+# FRED 1-4.1 Stats
+
+```{r}
+
+summarize_fred_arctic <- function(df, dataset_name) {
+  
+  df_arctic <- df |>
+    mutate(Latitude_Main = as.numeric(Latitude_Main),
+           Longitude_Main = as.numeric(Longitude_Main)) |>
+    filter(
+      (Latitude_Main >= 66.5333 & Latitude_Main <= 90.0) |
+      (Latitude_Main >= 60.0 & Latitude_Main < 66.5333 &
+         Longitude_Main >= -170 & Longitude_Main <= -20) |
+      (Latitude_Main >= 62.0 & Latitude_Main < 66.5333 &
+         ((Longitude_Main >= 60 & Longitude_Main <= 180) |
+          (Longitude_Main >= -180 & Longitude_Main <= -170)))
+    )
+  
+  num_articles <- df_arctic |>
+    distinct(Article) |>
+    nrow()
+  
+  unique_species <- df_arctic |>
+    dplyr::select(genus, species) |>
+    mutate(across(everything(), ~ na_if(str_trim(.x), ""))) |>
+    distinct(genus, species, .keep_all = TRUE) |>
+    remove_empty(which = "rows") |>
+    nrow()
+  
+  unique_coord <- df_arctic |>
+    dplyr::select(Latitude_Main, Longitude_Main) |>
+    drop_na(Latitude_Main, Longitude_Main) |>
+    distinct() |>
+    nrow()
+  
+  df_sf <- st_as_sf(
+    df_arctic,
+    coords = c("Longitude_Main", "Latitude_Main"),
+    crs = 4326,
+    remove = FALSE
+  )
+  
+  countries_sf <- ne_countries(scale = "medium", returnclass = "sf")
+  
+  df_with_countries <- st_join(
+    df_sf,
+    countries_sf[, c("name", "iso_a3")]
+  )
+  
+  names(df_with_countries)[names(df_with_countries) == "name"] <- "Country_Name"
+  names(df_with_countries)[names(df_with_countries) == "iso_a3"] <- "Country_ISO"
+  
+  df_with_countries <- as.data.frame(df_with_countries)
+  
+  num_countries <- df_with_countries |>
+    drop_na(Country_Name) |>
+    distinct(Country_Name) |>
+    nrow()
+  
+  df_countryyr <- df_with_countries |>
+    mutate(
+      Article = str_replace(Article,
+                            "Shaver & Billlings 197$",
+                            "Shaver & Billlings 1975"),
+      year = str_extract(Article, "[0-9]{4}")
+    )
+  
+  num_years <- df_countryyr |>
+    drop_na(year) |>
+    distinct(year) |>
+    nrow()
+  
+  tibble(
+    Statistic = c(
+      "Articles",
+      "Unique genus and species",
+      "Unique coordinates",
+      "Countries represented",
+      "Years represented"
+    ),
+    !!dataset_name := c(
+      num_articles,
+      unique_species,
+      unique_coord,
+      num_countries,
+      num_years
+    )
+  )
+}
+
+# run on both datasets
+fred4_summary    <- summarize_fred_arctic(FRED4_cleaned, "FRED4")
+fred4new_summary <- summarize_fred_arctic(FRED4new_cleaned, "FRED4new")
+
+# combine into one table, joined on Statistic
+combined_table <- fred4_summary |>
+  left_join(fred4new_summary, by = "Statistic")
+
+combined_table |>
+  kbl(
+    align = c("l", "c", "c"),
+    booktabs = TRUE
+  ) |>
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    font_size = 11
+  )
+
+```
+
+```{r}
+# combine both datasets into one
+FRED_combined <- bind_rows(
+  FRED4_cleaned |> mutate(source = "FRED4"),
+  FRED4new_cleaned |> mutate(source = "FRED4new")
+)
+
+summarize_fred_arctic <- function(df) {
+  
+  df_arctic <- df |>
+    mutate(Latitude_Main = as.numeric(Latitude_Main),
+           Longitude_Main = as.numeric(Longitude_Main)) |>
+    filter(
+      (Latitude_Main >= 66.5333 & Latitude_Main <= 90.0) |
+      (Latitude_Main >= 60.0 & Latitude_Main < 66.5333 &
+         Longitude_Main >= -170 & Longitude_Main <= -20) |
+      (Latitude_Main >= 62.0 & Latitude_Main < 66.5333 &
+         ((Longitude_Main >= 60 & Longitude_Main <= 180) |
+          (Longitude_Main >= -180 & Longitude_Main <= -170)))
+    )
+  
+  num_obs <- nrow(df_arctic)
+  
+  num_articles <- df_arctic |>
+    distinct(Article) |>
+    nrow()
+  
+  unique_species <- df_arctic |>
+    dplyr::select(genus, species) |>
+    mutate(across(everything(), ~ na_if(str_trim(.x), ""))) |>
+    distinct(genus, species, .keep_all = TRUE) |>
+    remove_empty(which = "rows") |>
+    nrow()
+  
+  unique_coord <- df_arctic |>
+    dplyr::select(Latitude_Main, Longitude_Main) |>
+    drop_na(Latitude_Main, Longitude_Main) |>
+    distinct() |>
+    nrow()
+  
+  df_sf <- st_as_sf(
+    df_arctic,
+    coords = c("Longitude_Main", "Latitude_Main"),
+    crs = 4326,
+    remove = FALSE
+  )
+  
+  countries_sf <- ne_countries(scale = "medium", returnclass = "sf")
+  
+  df_with_countries <- st_join(
+    df_sf,
+    countries_sf[, c("name", "iso_a3")]
+  )
+  
+  names(df_with_countries)[names(df_with_countries) == "name"] <- "Country_Name"
+  names(df_with_countries)[names(df_with_countries) == "iso_a3"] <- "Country_ISO"
+  
+  df_with_countries <- as.data.frame(df_with_countries)
+  
+  num_countries <- df_with_countries |>
+    drop_na(Country_Name) |>
+    distinct(Country_Name) |>
+    nrow()
+  
+  df_countryyr <- df_with_countries |>
+    mutate(
+      Article = str_replace(Article,
+                            "Shaver & Billlings 197$",
+                            "Shaver & Billlings 1975"),
+      year = str_extract(Article, "[0-9]{4}")
+    )
+  
+  num_years <- df_countryyr |>
+    drop_na(year) |>
+    distinct(year) |>
+    nrow()
+  
+  tibble(
+    Statistic = c(
+      "Observations",
+      "Articles",
+      "Unique genus and species",
+      "Countries represented",
+      "Unique coordinates",
+      "Years represented"
+    ),
+    Value = c(
+      num_obs,
+      num_articles,
+      unique_species,
+      num_countries,
+      unique_coord,
+      num_years
+    )
+  )
+}
+
+combined_table <- summarize_fred_arctic(FRED_combined)
+
+combined_table |>
+  kbl(
+    align = c("l", "c"),
+    booktabs = TRUE
+  ) |>
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    font_size = 11
+  )
+
+# FRED_combined_countries <- FRED_combined |>
+#   mutate(Latitude_Main = as.numeric(Latitude_Main),
+#          Longitude_Main = as.numeric(Longitude_Main)) |>
+#   filter(
+#     (Latitude_Main >= 66.5333 & Latitude_Main <= 90.0) |
+#     (Latitude_Main >= 60.0 & Latitude_Main < 66.5333 &
+#        Longitude_Main >= -170 & Longitude_Main <= -20) |
+#     (Latitude_Main >= 62.0 & Latitude_Main < 66.5333 &
+#        ((Longitude_Main >= 60 & Longitude_Main <= 180) |
+#         (Longitude_Main >= -180 & Longitude_Main <= -170)))
+#   ) |>
+#   st_as_sf(coords = c("Longitude_Main", "Latitude_Main"), crs = 4326, remove = FALSE) |>
+#   st_join(ne_countries(scale = "medium", returnclass = "sf")[, c("name", "iso_a3")]) |>
+#   as.data.frame()
+# 
+# names(FRED_combined_countries)[names(FRED_combined_countries) == "name"] <- "Country_Name"
+# 
+# # just the distinct list of countries
+# FRED_combined_countries |>
+#   drop_na(Country_Name) |>
+#   distinct(Country_Name) |>
+#   arrange(Country_Name)
+```
+
+
+# Graphs
+
+## Full FRED Map
+
+```{r}
+
+FRED_combined_sf <- FRED_combined |>
+  mutate(Latitude_Main = as.numeric(Latitude_Main),
+         Longitude_Main = as.numeric(Longitude_Main)) |>
+  filter(
+    !is.na(Latitude_Main),
+    !is.na(Longitude_Main),
+     (Latitude_Main >= 66.5333 & Latitude_Main <= 90.0) |
+    (Latitude_Main >= 60.0 & Latitude_Main < 66.5333 &
+       Longitude_Main >= -170 & Longitude_Main <= -20) |
+    (Latitude_Main >= 62.0 & Latitude_Main < 66.5333 &
+       ((Longitude_Main >= 60 & Longitude_Main <= 180) |
+        (Longitude_Main >= -180 & Longitude_Main <= -170)))
+  ) |>
+  st_as_sf(
+    coords = c("Longitude_Main", "Latitude_Main"),
+    crs = 4326,
+    remove = FALSE
+  )
+
+world <- ne_countries(
+  scale = "medium",
+  returnclass = "sf"
+)
+
+FRED_combined_with_countries <- st_join(
+  FRED_combined_sf,
+  world[, "name"]
+)
+
+fullfred_map <- FRED_combined_with_countries |>
+  distinct(Article, .keep_all = TRUE)
+
+# sites_sf <- fullfred_map  
+
+country_counts <- fullfred_map |>
+  st_drop_geometry() |>
+  distinct(Article, name) |>
+  count(name, name = "n_articles")
+
+world_counts <- world |>
+  left_join(country_counts, by = "name")
+
+world_counts$n_articles[is.na(world_counts$n_articles)] <- 0
+
+arctic_crs <- 3995
+
+world_arctic <- st_transform(world_counts, arctic_crs)
+sites_arctic <- st_transform(fullfred_map, arctic_crs)
+
+# # We crop it in GPS coordinates (4326) before projecting to 3995
+# world_arctic <- world_counts |> 
+#   st_crop(xmin = -180, ymin = 50, xmax = 180, ymax = 90) |> # Kept it safe at >50°N
+#   st_transform(arctic_crs)
+
+ggplot() +
+  # Base Map Layer 
+  geom_sf(
+    data = world_arctic,
+    aes(fill = n_articles),
+    color = "grey40",
+    linewidth = 0.1
+  ) +
+  scale_fill_distiller(
+    palette = "Purples",
+    direction = 1,
+    name = "Articles"
+  ) +
+  
+  # Clear fill scale for next layer
+  new_scale_fill() +
+  
+  # Points Layer
+  geom_sf(
+    data = sites_arctic,
+    fill = "red",
+    shape = 21,             
+    colour = "black",     
+    size = 2.3,             
+    stroke = 0.6, 
+  ) +
+  # scale_fill_manual(
+  #   name = "Dataset",
+  #   # values = c("FRED4" = "red", "FRED4new" = "blue")
+  # ) +
+  coord_sf(
+    xlim = c(-4e6, 4e6),
+    ylim = c(-4e6, 4e6)
+  ) +
+  theme_minimal()
+
+```
+
+## Full FRED Map with Growth Form
+
+```{r}
+# Points colored by growth form
+
+fullfred_map <- FRED_combined_with_countries |>
+  st_drop_geometry() |>
+  filter(
+    !is.na(Latitude_Main),
+    !is.na(Longitude_Main)
+  ) |>
+  # Clean so that same growth form collapses together
+  mutate(
+    # Clean up whitespace and force lowercase
+    growth_clean = str_to_lower(str_trim(growth)),
+    growth_clean = case_when(
+      is.na(growth_clean) ~ "unspecified",
+      growth_clean == "" ~ "unspecified",
+      growth_clean == "unspecified" ~ "unspecified",
+      # if entry is entirely blank or just spaces, call it unspecified
+      str_detect(growth_clean, "^\\s*$") ~ "unspecified", 
+      str_detect(growth_clean, "fern") ~ "shrub", 
+      str_detect(growth_clean, "herb/shrub") ~ "shrub", 
+      str_detect(growth_clean, "shrub/tree") ~ "tree", 
+      TRUE ~ growth_clean
+    )
+  ) |>  # Distinct by BOTH Article and the cleaned growth form
+  distinct(Article, growth_clean, .keep_all = TRUE)
+
+sites_sf <- st_as_sf(
+  fullfred_map,
+  coords = c("Longitude_Main", "Latitude_Main"),
+  crs = 4326,
+  remove = FALSE
+)
+
+sites_country <- st_join(
+  sites_sf,
+  world[, "name"]
+)
+
+# distinct Articles are counted for the background fill
+country_counts <- sites_country |>
+  st_drop_geometry() |>
+  mutate(name = coalesce(name.x, name.y)) |>
+  select(-name.x, -name.y) |>
+  distinct(Article, name) |> 
+  count(name, name = "n_articles")
+
+world_counts <- world |> left_join(country_counts, by = "name")
+world_counts$n_articles[is.na(world_counts$n_articles)] <- 0
+
+world_arctic <- st_transform(world_counts, arctic_crs)
+sites_arctic <- st_transform(sites_country, arctic_crs)
+
+ggplot() +
+  # Base Map Layer
+  geom_sf(
+    data = world_arctic,
+    aes(fill = n_articles),
+    color = "grey40",
+    linewidth = 0.1
+  ) +
+  scale_fill_distiller(
+    palette = "Purples",
+    direction = 1,
+    name = "Articles"
+  ) +
+  
+  # Clear fill scale for next layer
+  new_scale_fill() +
+  
+  # Points color-coded by growth form
+  geom_sf(
+    data = sites_arctic,
+      aes(fill = growth_clean),
+      shape = 21,
+      size = 2.5,
+      stroke = 0.5,
+      colour = "black"
+                         
+  ) + 
+    scale_fill_manual(
+      values = c(
+      "graminoid" = "#FFD700",   # Bright Gold / Yellow (cuts through dark purple)
+      "herb"      = "#E8FFF3",   # Spring Green (pops against mid/dark tones)
+      "shrub"     = "#FF6B6B",   # Coral Red/Pink (high contrast on light purple)
+      "tree"      = "#00E5FF",    # Electric Cyan/Aqua (extreme contrast on dark purple)
+      "unspecified"  = "#B2BABB"
+    ),
+    name = "Growth Form")+         # Pure crisp white for NA values to completely stand out
+  # scale_fill_brewer(
+  #   palette = "Set2",
+  #   name = "Growth Form",
+  #   na.value = "grey70"       # "unspecified" or NA entries will show as a neutral grey
+  # ) +
+  coord_sf(
+    xlim = c(-4e6, 4e6),
+    ylim = c(-4e6, 4e6)
+  ) +
+  theme_minimal()
+
+```
+
+
+# Articles Per Year Bar Graph
+
+```{r}
+
+# aggregate data by Year and Category
+yearly_trends <- FRED_combined_with_countries |>
+  st_drop_geometry() |>
+  # Ensure we only count each article once 
+  distinct(Article, .keep_all = TRUE) |>
+  # Clean up and extract the 4-digit year from the citation
+  mutate(Article = str_replace(Article,
+                          "Shaver & Billlings 197$",
+                          "Shaver & Billlings 1975"),
+    Year = as.numeric(str_extract(Article, "[0-9]{4}"))
+  ) |>
+  group_by(Year) |>
+  summarise(Paper_Count = n(), .groups = "drop")
+
+# plot the timeline trend
+ggplot(yearly_trends, aes(x = Year, y = Paper_Count)) +
+  # Move fill directly inside geom_col to apply it uniformly to all bars
+  geom_col(width = 1, fill = "#00A5CF", color = "black", linewidth = 0.2) + 
+  
+  scale_x_continuous(breaks = seq(1920, 2025, by = 10)) +
+  scale_y_continuous(
+    # Skips by 2
+    breaks = seq(0, max(yearly_trends$Paper_Count, na.rm = TRUE) + 2, by = 2)
+  ) + 
+  theme_minimal() +
+  labs(
+    x = "Publication Year",
+    y = "Number of Papers" 
+  ) +
+  theme(
+    text = element_text(size = 11)
+  )
+
+decade_trends <- yearly_trends |>
+  mutate(Decade = floor(Year / 10) * 10) |>
+  group_by(Decade) |>
+  summarise(Paper_Count = sum(Paper_Count), .groups = "drop")
+
+ggplot(decade_trends, aes(x = factor(Decade), y = Paper_Count)) +
+  geom_col(fill = "#00A5CF", color = "black", linewidth = 0.2) +
+  theme_minimal() +
+  labs(
+    x = "Decade",
+    y = "Number of Papers"
+  ) +
+  theme(
+    text = element_text(size = 11)
+  )
+
+
+```
+
+# Most Popular Root traits measured
+
+```{r}
+fullfred_arctic_pivot <- FRED_combined |> 
+  filter((Latitude_Main >= 66.5333 & Latitude_Main <= 90.0) |
+    (Latitude_Main >= 60.0 & Latitude_Main < 66.5333 &
+       Longitude_Main >= -170 & Longitude_Main <= -20) |
+    (Latitude_Main >= 62.0 & Latitude_Main < 66.5333 &
+       ((Longitude_Main >= 60 & Longitude_Main <= 180) |
+        (Longitude_Main >= -180 & Longitude_Main <= -170)))) |>
+  # dplyr::select non-empty columns
+  dplyr::select(-Latitude_Main, -Longitude_Main,
+                -order, -family, -genus, -species, -growth,
+                -Elevation) |>
+  # keep columns article, lat, long and only pivot root trait columns 
+  pivot_longer(cols = 2:682,
+               names_to = "Trait",
+               values_to = "Value",
+               values_drop_na = TRUE) |>
+  # turn all empty cells into NAs
+  mutate_all(na_if, "") |> 
+  # remove NAs
+  drop_na()
+
+countsbyrt <- fullfred_arctic_pivot |>
+  # keep only numeric values
+  mutate(Value = as.numeric(Value),
+         Trait = if_else(str_detect(tolower(Trait), "diameter"), "Diameter", Trait),
+         Trait = if_else(str_detect(tolower(Trait), "rooting depth"), 
+                         "Rooting Depth", Trait),
+                  Trait = if_else(str_detect(str_squish(tolower(Trait)), 
+                                             "se_belowground biomass per ground area"), 
+                                  "Belowground biomass per ground area", Trait)) |>
+  drop_na(Value) |>
+  group_by(Article, Trait) |> 
+  summarize(.groups = "drop") |> 
+  # count how many articles have each trait
+  group_by(Trait) |>
+  summarize(Count = n(), .groups = "drop") |>
+  slice_max(Count, n = 10, with_ties = FALSE) |>
+  mutate(Type = str_replace_all(Trait, "_", " ")) 
+
+  # 
+  # group_by(Article) |>
+  # summarize(Type = unique(Trait), .groups = "drop") |>
+  # group_by(Type) |>
+  # summarize(Count = n(), .groups = "drop") |>
+  # slice_max(Count, n = 10, with_ties = FALSE) |>
+  # mutate(Type = str_replace_all(Type, "_", " "))
+
+ggplot(
+  countsbyrt,
+  aes(x = Count, y = reorder(Type, Count))
+) +
+  geom_col(fill = "darkgreen") + 
+  labs(
+    x = "Number of Articles that Record the Root Trait",
+    y = "Root Trait Name"
+  ) +
+  theme_minimal()
+
+```
+
