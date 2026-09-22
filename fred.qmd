@@ -132,10 +132,11 @@ FRED4_cleaned <- FRED4 |>
          family = "Plant taxonomy_Accepted family_WFO", 
          genus = "Plant taxonomy_Accepted genus_WFO", 
          species = "Plant Taxonomy_Accepted species_WFO",
-         growth = "Plant growth form_TRY") |>
-  # dplyr::select article, coordinates, and root trait columns
+         growth = "Plant growth form_TRY",
+         treatment = "Notes_Treatment types") |>
+  # select article, coordinates, and root trait columns
   dplyr::select(Article, citation, Latitude_Main, Longitude_Main,
-                order, family, genus, species, growth,
+                order, family, genus, species, growth, treatment, 
                 indices)
 
 # removing the row that represented "type"
@@ -198,10 +199,11 @@ FRED4new_cleaned <- FRED4new |>
          family = "Plant taxonomy_Accepted family_WFO",
          genus = "Plant taxonomy_Accepted genus_WFO",
          species = "Plant Taxonomy_Accepted species_WFO",
-         growth = "Plant growth form_TRY") |>
+         growth = "Plant growth form_TRY",
+         treatment = "Notes_Treatment types") |>
   # select article, coordinates, and root trait columns
   dplyr::select(Article, citation, Latitude_Main, Longitude_Main,
-                order, family, genus, species, growth,
+                order, family, genus, species, growth, treatment, 
                 indices)
 
 # removing the row that represented "type"
@@ -513,20 +515,143 @@ print(holes_only)
 ```
 
 
-```{r}
-#TODO
-# have to add back experimental vs control without counting it as a root trait to FRED_combined
-
-FRED_combined$Article
-unique(FRED_combined$`Notes_Treatment types`)
-
-FRED_combined_warmingvscontrol
-
-```
-
 
 
 # Graphs
+
+## Control vs Warming
+
+
+```{r}
+# belowground biomass control vs warming
+
+
+FRED_belowground <- FRED_combined_clean |>
+  drop_na(`Belowground biomass per ground area`) |>
+  filter(treatment %in% c("control", "warming")) |>
+  rename(biomass = `Belowground biomass per ground area`) 
+
+ggplot(data = FRED_belowground, aes(y = biomass, x = treatment, fill = treatment)) +
+  geom_boxplot() +
+  geom_jitter(alpha = 0.5) +
+  ylab("Belowground biomass per ground area") +
+  labs(title = "Belowground biomass per ground area by Control vs Warming")
+
+ggplot(data = FRED_belowground, aes(y = log(biomass), x = treatment, fill = treatment)) +
+  geom_boxplot() +
+  geom_jitter(alpha = 0.5) +
+  ylab("log(belowground biomass per ground area)") +
+   labs(title = "Log of belowground biomass per ground area by Control vs Warming")
+
+
+sum(FRED_belowground$treatment == "control")
+sum(FRED_belowground$treatment == "warming")
+```
+
+```{r}
+# root N content
+
+FRED_rootN <- FRED_combined_clean |>
+  drop_na(`Root N content`) |>
+  filter(treatment %in% c("control", "warming")) 
+
+ggplot(data = FRED_rootN, aes(y = `Root N content`, x = treatment, fill = treatment)) +
+  geom_boxplot()  +
+  geom_jitter(alpha = 0.5) +
+  ylab("Root N content") +
+  labs(title = "Root N Content by Control vs Warming")
+
+sum(FRED_rootN$treatment == "control")
+sum(FRED_rootN$treatment == "warming")
+```
+
+```{r}
+# root C/N ratio
+
+FRED_rootCN <- FRED_combined_clean |>
+  drop_na(`Root C/N ratio`) |>
+  filter(treatment %in% c("control", "warming")) 
+
+ggplot(data = FRED_rootCN, aes(y = `Root C/N ratio`, x = treatment, fill = treatment)) +
+  geom_boxplot() +
+  geom_jitter(alpha = 0.5) +
+  ylab("Root C/N Ratio") +
+  labs(title = "Root C/N ratio by Control vs Warming")
+
+sum(FRED_rootCN$treatment == "control")
+sum(FRED_rootCN$treatment == "warming")
+```
+```{r}
+# root diameter
+
+FRED_rootdiam <- FRED_combined_clean |>
+  drop_na(`Root diameter`) |>
+  filter(treatment %in% c("control", "warming")) 
+
+ggplot(data = FRED_rootdiam, aes(y = `Root diameter`, x = treatment, fill = treatment)) +
+  geom_boxplot() +
+  geom_jitter(alpha = 0.5) +
+  ylab("Root Diameter") +
+  labs(title = "Root Diameter by Control vs Warming")
+
+sum(FRED_rootdiam$treatment == "control")
+sum(FRED_rootdiam$treatment == "warming")
+
+# SRL
+FRED_srl <- FRED_combined_clean |>
+  drop_na(`Specific root length (SRL)`) |>
+  filter(treatment %in% c("control", "warming")) 
+
+ggplot(data = FRED_srl, aes(y = `Specific root length (SRL)`, x = treatment, fill = treatment)) +
+  geom_boxplot() +
+  geom_jitter(alpha = 0.5) +
+  ylab("Specific Root Length") +
+  labs(title = "SRL by Control vs Warming")
+
+ggplot(data = FRED_srl, aes(y = log(`Specific root length (SRL)`), x = treatment, fill = treatment)) +
+  geom_boxplot() +
+  geom_jitter(alpha = 0.5) +
+  ylab("log (Specific Root Length)") +
+  labs(title = "SRL by Control vs Warming")
+
+sum(FRED_srl$treatment == "control")
+sum(FRED_srl$treatment == "warming")
+
+# RTD
+FRED_combined_clean$`Root tissue density (RTD)`
+FRED_rtd <- FRED_combined_clean |>
+  drop_na(`Root tissue density (RTD)`) |>
+  filter(treatment %in% c("control", "warming")) 
+
+ggplot(data = FRED_rtd, aes(y = `Root tissue density (RTD)`, x = treatment, fill = treatment)) +
+  geom_boxplot() +
+  ylab("Root tissue density (RTD)") +
+  labs(title = "RTD by Control vs Warming")
+
+sum(FRED_rtd$treatment == "control")
+sum(FRED_rtd$treatment == "warming")
+
+# root growth
+
+# check how many NAs coerced - only 1
+sum(is.na(as.numeric(FRED_combined_clean$`Root growth_Annual mass production per ground area`))) - sum(is.na(FRED_combined_clean$`Root growth_Annual mass production per ground area`))
+
+FRED_rootgrowth <- FRED_combined_clean |>
+  mutate(`Root growth_Annual mass production per ground area` = as.numeric(`Root growth_Annual mass production per ground area`)) |>
+  drop_na(`Root growth_Annual mass production per ground area`) |>
+  filter(treatment %in% c("control", "warming")) 
+
+ggplot(data = FRED_rootgrowth, aes(y = `Root growth_Annual mass production per ground area`, x = treatment, fill = treatment)) +
+  geom_boxplot() +
+  geom_jitter() + 
+  ylab("Root Growth g/m^2/yr") +
+  labs(title = "Root Growth by Control vs Warming")
+
+sum(FRED_rootgrowth$treatment == "control")
+sum(FRED_rootgrowth$treatment == "warming")
+
+```
+
 
 ## Full FRED Map
 
