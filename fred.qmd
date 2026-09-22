@@ -20,19 +20,61 @@ library(stringr)
 library(tibble)
 library(dplyr)
 library(kableExtra)
+library(data.table)
+
+library(googledrive)
 
 options(digits = 6)
 ```
 
 # Importing Data
 
+
 ```{r}
-# Importing data sets
-# FRED3 <- read.csv("FRED3.csv")
-FRED4 <- read.csv("FRED4_Entire_Database_2026.csv")
-FRED_newest <- readr::read_csv("FRED_NEWEST.csv",
-                        locale = readr::locale(encoding = "latin1"))
+
+url <- "https://media.githubusercontent.com/media/mirandayang80/fine-roots-analysis-arctic/7c84038f04c27a8cd8ca2e56e6c17670c5c2c085/FRED4_Entire_Database_2026.csv"
+
+FRED4 <- read_csv(
+  url,
+  locale = locale(encoding = "latin1")
+)
+
+url2 <- "https://raw.githubusercontent.com/mirandayang80/fine-roots-analysis-arctic/7c84038f04c27a8cd8ca2e56e6c17670c5c2c085/FRED_NEWEST.csv"
+
+FRED_newest <- read_csv(
+  url2,
+  locale = locale(encoding = "latin1")
+)
+
 # 
+# drive_auth()
+# 
+# FRED4 <- drive_get("FRED4_Entire_Database_2026.csv") %>% 
+#   drive_read_string() %>% 
+#   readr::read_csv(locale = readr::locale(encoding = "latin1"))
+
+# 
+# FRED4 <- drive_get("FRED-arctic/FRED4_Entire_Database_2026.csv") %>% 
+#   drive_read_string() %>% 
+#   read.csv(text = ., locale = readr::locale(encoding = "latin1"))
+
+
+# FRED4_id <- "1zl5jqvvsToAs2ua0HRONwMA85kztwYTQ"
+# FRED4_url <- sprintf("https://google.com", FRED4_id)
+# 
+# 
+# FRED4 <- readr::read_csv(FRED4_url,
+#                         locale = readr::locale(encoding = "latin1"))
+# 
+# head(FRED4)
+
+# 
+# # Importing data sets
+# # FRED3 <- read.csv("FRED3.csv")
+# FRED4 <- read.csv("FRED4_Entire_Database_2026.csv")
+# FRED_newest <- readr::read_csv("FRED_NEWEST.csv",
+#                         locale = readr::locale(encoding = "latin1"))
+# # 
 # AU <- read.csv("AUwarming.csv")
 ```
 
@@ -281,6 +323,7 @@ combined_table |>
     font_size = 11
   )
 
+
 ```
 
 ```{r}
@@ -416,6 +459,71 @@ combined_table |>
 #   distinct(Country_Name) |>
 #   arrange(Country_Name)
 ```
+
+```{r}
+
+FRED_combined_clean <- FRED_combined |>
+    mutate(across(where(is.character), ~ {
+    x <- suppressWarnings(as.numeric(.x))
+    if (all(is.na(.x) == is.na(x))) x else .x
+  }))
+
+#TODO: need to convert numeric cols to numeric
+
+# boxplot of root traits
+# 
+# FRED_combined_biomass <- FRED_combined |>
+#   select(`Belowground biomass per ground area`) |>
+#   drop_na(`Belowground biomass per ground area`) |>
+#   mutate(`Belowground biomass per ground area` = as.numeric(`Belowground biomass per ground area`))
+
+ggplot(FRED_combined_clean, aes(x = `Belowground biomass per ground area`)) +
+  geom_boxplot()
+
+summary(FRED_combined_clean$`Belowground biomass per ground area`)
+
+ggplot(FRED_combined_clean, aes(x = `Rooting depth`)) +
+  geom_density()
+
+summary(FRED_combined_clean$`Rooting depth`)
+
+
+
+```
+
+```{r}
+# NAs in data set
+
+df <- setDT(FRED_combined_clean)
+
+# get a count of missing values for every single column
+na_counts <- df[, lapply(.SD, function(x) sum(is.na(x)))]
+
+# readable two-column summary
+na_summary <- data.table(
+  column = names(na_counts), 
+  na_count = as.numeric(na_counts[1, ])
+)
+
+# filter to show only columns that actually have holes
+holes_only <- na_summary[na_count > 0]
+print(holes_only)
+
+
+```
+
+
+```{r}
+#TODO
+# have to add back experimental vs control without counting it as a root trait to FRED_combined
+
+FRED_combined$Article
+unique(FRED_combined$`Notes_Treatment types`)
+
+FRED_combined_warmingvscontrol
+
+```
+
 
 
 # Graphs
@@ -701,15 +809,29 @@ fullfred_arctic_pivot <- FRED_combined |>
   # remove NAs
   drop_na()
 
+# variables cleaned names
+# countsbyrt <- fullfred_arctic_pivot |>
+  # # keep only numeric values
+  # mutate(Value = as.numeric(Value),
+  #        Trait = if_else(str_detect(tolower(Trait), "diameter"), "Diameter", Trait),
+  #        Trait = if_else(str_detect(tolower(Trait), "rooting depth"), 
+  #                        "Rooting Depth", Trait),
+  #                 Trait = if_else(str_detect(str_squish(tolower(Trait)), 
+  #                                            "se_belowground biomass per ground area"), 
+  #                                 "Belowground biomass per ground area", Trait)) |>
+  # drop_na(Value) |>
+  # group_by(Article, Trait) |> 
+  # summarize(.groups = "drop") |> 
+  # # count how many articles have each trait
+  # group_by(Trait) |>
+  # summarize(Count = n(), .groups = "drop") |>
+  # slice_max(Count, n = 10, with_ties = FALSE) |>
+  # mutate(Type = str_replace_all(Trait, "_", " ")) 
+
+#ORGINAL VARIABLES
 countsbyrt <- fullfred_arctic_pivot |>
   # keep only numeric values
-  mutate(Value = as.numeric(Value),
-         Trait = if_else(str_detect(tolower(Trait), "diameter"), "Diameter", Trait),
-         Trait = if_else(str_detect(tolower(Trait), "rooting depth"), 
-                         "Rooting Depth", Trait),
-                  Trait = if_else(str_detect(str_squish(tolower(Trait)), 
-                                             "se_belowground biomass per ground area"), 
-                                  "Belowground biomass per ground area", Trait)) |>
+  mutate(Value = as.numeric(Value)) |>
   drop_na(Value) |>
   group_by(Article, Trait) |> 
   summarize(.groups = "drop") |> 
